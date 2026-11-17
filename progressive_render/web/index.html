@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>设计评审渐进渲染 · 预览争用面板</title>
+<style>
+  :root {
+    --bg:#14171d; --panel:#1d222b; --panel2:#242a35; --line:#313846;
+    --text:#e6e9ef; --muted:#94a0b4; --accent:#5aa2ff; --warn:#f0b45a;
+    --bad:#ef6f6f; --ok:#5fd08a; --purple:#b58cff;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:13px/1.5 -apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line);
+           display:flex; align-items:baseline; gap:14px; background:var(--panel); }
+  header h1 { font-size:16px; margin:0; }
+  header .sub { color:var(--muted); font-size:12px; }
+  .layout { display:grid; grid-template-columns:330px 1fr 380px; gap:14px;
+            padding:14px; align-items:start; }
+  .card { background:var(--panel); border:1px solid var(--line);
+          border-radius:10px; padding:14px; margin-bottom:14px; }
+  .card h2 { font-size:12.5px; margin:0 0 10px; color:var(--accent);
+             text-transform:uppercase; letter-spacing:.06em; }
+  label { display:block; margin:8px 0 3px; color:var(--muted); font-size:12px; }
+  input, select, button {
+    font:inherit; color:var(--text); background:var(--panel2);
+    border:1px solid var(--line); border-radius:6px; padding:6px 8px; width:100%; }
+  input[type=range] { padding:0; }
+  button { cursor:pointer; width:auto; font-weight:600; }
+  button.primary { background:var(--accent); color:#0b1420; border-color:var(--accent); }
+  button.final { background:var(--purple); color:#1a1030; border-color:var(--purple); }
+  button.ghost { background:transparent; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .row { display:flex; gap:8px; }
+  .row > * { flex:1; }
+  .hint { color:var(--muted); font-size:11.5px; margin-top:4px; }
+  .badge { display:inline-block; padding:1px 7px; border-radius:20px;
+           font-size:11px; font-weight:700; }
+  .b-preview { background:#1d3a5f; color:#9cc6ff; }
+  .b-final { background:#3a2658; color:#cdafff; }
+  .s-queued { color:var(--warn); } .s-running { color:var(--accent); }
+  .s-done { color:var(--ok); } .s-cancelled { color:var(--muted); }
+  .s-failed { color:var(--bad); }
+  .frames { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .frame-box { background:#0d0f13; border:1px solid var(--line);
+               border-radius:8px; padding:10px; }
+  .frame-box h3 { margin:0 0 8px; font-size:12px; display:flex;
+                  justify-content:space-between; align-items:center; }
+  .frame-box img { width:100%; image-rendering:pixelated; border-radius:4px;
+                   background:#0c0e12; min-height:120px; display:block; }
+  .meta { font-size:11.5px; color:var(--muted); margin-top:8px;
+          display:grid; grid-template-columns:auto 1fr; gap:2px 10px; }
+  .meta b { color:var(--text); font-weight:600; }
+  .stale { outline:2px dashed var(--warn); }
+  table { width:100%; border-collapse:collapse; font-size:11.5px; }
+  th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line);
+           vertical-align:middle; }
+  th { color:var(--muted); font-weight:600; }
+  .jobs-wrap { max-height:340px; overflow:auto; }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .kpi { background:var(--panel2); border-radius:8px; padding:8px; text-align:center; }
+  .kpi .n { font-size:18px; font-weight:700; }
+  .kpi .l { font-size:10.5px; color:var(--muted); }
+  .toast { position:fixed; right:18px; bottom:18px; max-width:380px;
+           background:var(--panel2); border:1px solid var(--line);
+           border-left:4px solid var(--warn); border-radius:8px; padding:10px 14px;
+           display:none; z-index:20; }
+  .toast.bad { border-left-color:var(--bad); }
+  .toast.ok { border-left-color:var(--ok); }
+  .prog { height:5px; background:var(--line); border-radius:4px; overflow:hidden; }
+  .prog > i { display:block; height:100%; background:var(--accent);
+              transition:width .25s; }
+  .cfg-view { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px;
+              color:var(--muted); white-space:pre-wrap; word-break:break-all;
+              max-height:220px; overflow:auto; }
+  .pill { font-size:10.5px; padding:1px 6px; border-radius:5px;
+          background:var(--panel2); border:1px solid var(--line); color:var(--muted); }
+  .reject { color:var(--bad); font-weight:700; }
+</style>
+</head>
+<body>
+<header>
+  <h1>设计评审渐进渲染服务</h1>
+  <span class="sub">预览争用内核 · 有界进程池
+    <span id="poolInfo" class="pill"></span></span>
+  <span class="sub" style="margin-left:auto">
+    队列 <b id="queueDepth">0</b>/<span id="queueLimit"></span> ·
+    在途 <b id="inFlight">0</b></span>
+</header>
+
+<div class="layout">
+  <!-- ===================== LEFT: controls driven by kernel ===================== -->
+  <div>
+    <div class="card">
+      <h2>评审者与场景</h2>
+      <label>评审者（模拟多人）</label>
+      <select id="reviewer">
+        <option>reviewer-alice</option>
+        <option>reviewer-bob</option>
+        <option>reviewer-carol</option>
+      </select>
+      <label>场景（复杂度递增）</label>
+      <select id="scene">
+        <option value="simple_sphere">simple_sphere · 3 图元</option>
+        <option value="materials_room">materials_room · 5 图元</option>
+        <option value="glass_and_friends">glass_and_friends · 13 图元</option>
+      </select>
+      <div class="row">
+        <div><label>预览宽</label><input id="pw" type="number" value="160"></div>
+        <div><label>预览高</label><input id="ph" type="number" value="120"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>相机（快速拖动触发版本取代）</h2>
+      <label>方位角 <span id="azVal" class="pill">0°</span></label>
+      <input id="azimuth" type="range" min="-180" max="180" value="40">
+      <label>高度角 <span id="elVal" class="pill">18°</span></label>
+      <input id="elevation" type="range" min="-5" max="60" value="18">
+      <label>距离 <span id="distVal" class="pill">6.5</span></label>
+      <input id="distance" type="range" min="3" max="10" step="0.1" value="6.5">
+      <label>FOV <span id="fovVal" class="pill">45°</span></label>
+      <input id="fov" type="range" min="25" max="80" value="45">
+      <div class="hint">拖动滑块即连续提交低预算预览；松手静止后可提交最终出图。</div>
+    </div>
+
+    <div class="card">
+      <h2>材质调整</h2>
+      <label>主球体反照率 R,G,B（0–1）</label>
+      <input id="albedo" value="0.8,0.25,0.2">
+      <label>预览优先级（可切换预览争用强度）</label>
+      <select id="priority">
+        <option value="9">9 · 高（交互优先）</option>
+        <option value="5" selected>5 · 普通</option>
+        <option value="2">2 · 低（让位于最终图）</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
+        <input type="checkbox" id="coalesce" checked style="width:auto">
+        拖动时自动取代旧版本（取消勾选可演练评审者限额排队）
+      </label>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="btnPreview">提交预览</button>
+        <button class="final" id="btnFinal">稳定配置 → 最终出图队列</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="ghost" id="btnFail">演练：注入渲染失败</button>
+        <button class="ghost" id="btnSim">运行多评审者演练</button>
+      </div>
+      <div class="hint">最终图目标 48 spp、200×150；预览目标 4 spp。限额与排队由内核强制。</div>
+    </div>
+  </div>
+
+  <!-- ===================== CENTER: progressive result area ===================== -->
+  <div>
+    <div class="card">
+      <h2>结果区 · 真实逐步改善的图像</h2>
+      <div class="frames">
+        <div class="frame-box" id="previewBox">
+          <h3><span class="badge b-preview">PREVIEW</span>
+              <span id="pvSpp" class="pill">spp -</span></h3>
+          <img id="previewImg" alt="preview frame">
+          <div class="meta">
+            <span>配置版本</span><b id="pvHash">-</b>
+            <span>任务状态</span><b id="pvState">-</b>
+            <span>首帧延迟</span><b id="pvFirst">-</b>
+            <span>当前视图版本</span><b id="viewHash">-</b>
+          </div>
+          <div class="prog" style="margin-top:8px"><i id="pvProg" style="width:0%"></i></div>
+          <div class="hint" id="pvStale" style="display:none;color:var(--warn)">
+            该帧属于旧配置版本，不会覆盖当前视图；已停止继续消耗预算。</div>
+        </div>
+        <div class="frame-box" id="finalBox">
+          <h3><span class="badge b-final">FINAL</span>
+              <span id="fnSpp" class="pill">spp -</span></h3>
+          <img id="finalImg" alt="final render">
+          <div class="meta">
+            <span>配置版本</span><b id="fnHash">-</b>
+            <span>任务状态</span><b id="fnState">-</b>
+            <span>完成延迟</span><b id="fnLatency">-</b>
+            <span>有效采样</span><b id="fnEff">-</b>
+          </div>
+          <div class="prog" style="margin-top:8px"><i id="fnProg" style="width:0%"></i></div>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:10px">
+        预览帧按 tile 渐进刷新（每 50ms 轮询，ETag 未变则 304）；
+        晚到的旧 cfg_hash 帧被前端拒绝绘制。最终图独立成队，不与预览冒充同质量。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>当前完整配置（每个结果绑定的不可变版本）</h2>
+      <div class="cfg-view" id="cfgView">调整控件后在此显示冻结配置与 cfg_hash。</div>
+    </div>
+  </div>
+
+  <!-- ===================== RIGHT: kernel-driven job panel ===================== -->
+  <div>
+    <div class="card">
+      <h2>内核实时状态</h2>
+      <div class="kpis">
+        <div class="kpi"><div class="n" id="kSubmitted">0</div><div class="l">提交</div></div>
+        <div class="kpi"><div class="n" id="kDone">0</div><div class="l">完成</div></div>
+        <div class="kpi"><div class="n" id="kSuper">0</div><div class="l">取代</div></div>
+        <div class="kpi"><div class="n" id="kReject">0</div><div class="l">限额拒绝</div></div>
+      </div>
+      <div class="meta" style="margin-top:10px">
+        <span>已运行分片</span><b id="kChunks">0</b>
+        <span>失败分片</span><b id="kChunkFail">0</b>
+        <span>失败任务</span><b id="kFailed">0</b>
+        <span>预览延迟</span><b id="kPvLat">-</b>
+        <span>最终延迟</span><b id="kFnLat">-</b>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>出图任务面板（调度顺序由优先级+等待时间决定）</h2>
+      <div class="jobs-wrap">
+        <table>
+          <thead><tr><th>任务</th><th>评审者</th><th>类型</th><th>状态</th>
+            <th>spp</th><th>分片</th><th>年龄</th><th></th></tr></thead>
+          <tbody id="jobsBody"></tbody>
+        </table>
+      </div>
+      <div class="hint">等待超过 6 秒的最终图获得老化跃升，连续预览无法将其永久饿死。</div>
+    </div>
+
+    <div class="card" id="simCard" style="display:none">
+      <h2>多评审者演练结果</h2>
+      <div class="cfg-view" id="simOut"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>

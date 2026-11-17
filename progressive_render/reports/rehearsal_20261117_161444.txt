@@ -1,0 +1,59 @@
+
+========================================================================
+ DESIGN REVIEW PROGRESSIVE RENDER — REHEARSAL REPORT
+========================================================================
+
+## rapid_camera_drag  (4.67s)
+   8 camera versions in <1s; only the newest survives
+   versions submitted : 8
+   distinct hashes    : 8
+   superseded previews: 7
+   surviving jobs     : 1
+
+## preview_flood_vs_final  (8.87s)
+   final job must finish despite continuous previews
+   final state        : done
+   final latency ms   : 8821.6
+   final effective spp: 32 / 32
+   previews meanwhile : 1 completed, 73 superseded
+
+## reviewer_quota_enforced  (0.09s)
+   4th+ queued preview gets a bounded 429-style rejection
+   accepted : 3
+   rejected : 5
+   reason   : {'status': 'rejected', 'reason': 'reviewer_quota', 'limit': 3, 'retry_after': 'cancel or wait for an older preview'}
+
+## failure_feeds_back_to_preview  (0.1s)
+   worker exception becomes job FAILED with reason
+   state    : failed
+   error    : RuntimeError('injected render failure (failure-path rehearsal)')
+
+## long_final_with_interactive_previews  (30.77s)
+   previews stay responsive while a 48spp final renders
+   preview 0: done      first-frame=347.1ms spp=2/2
+   preview 1: done      first-frame=89.3ms spp=2/2
+   preview 2: done      first-frame=30.9ms spp=2/2
+   preview 3: done      first-frame=83.2ms spp=2/2
+   final   : done spp=48/48 latency=30734.8ms
+
+## priority_toggle_reorders_queue  (17.86s)
+   with the pool saturated, priority-9 starts before p2 even though it was submitted later
+   high(p9) start ms : 10401.6 state=done
+   low (p2) start ms : 10401.6 state=done
+   high scheduled first: True
+
+------------------------------------------------------------------------
+ KERNEL METRICS
+------------------------------------------------------------------------
+   submitted         : 94
+   completed         : 18
+   superseded        : 73
+   cancelled         : 0
+   rejected_quota    : 5
+   rejected_full     : 0
+   failed            : 1
+   chunks_run        : 1830
+   chunks_failed     : 2
+   preview latency ms   : n=12 min=1133 avg=4495 max=16848
+   final latency ms   : n=6 min=8822 avg=15392 max=30735
+========================================================================
