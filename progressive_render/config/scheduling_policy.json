@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "policy_name": "preview-contention-default",
+  "release_channel": "default",
+  "status": "active",
+  "description": "Default release scheduling contract. Every numeric value below is asserted against engine/kernel.py by tools/policy_validator.py — the file is an executable contract, not a copy of the docs.",
+  "retired": [],
+  "workers": {
+    "min": 2,
+    "max": 8,
+    "reserve_cores": 2,
+    "formula": "min(max, max(min, cpu_count - reserve_cores))"
+  },
+  "queue": {
+    "reviewer_quota": 3,
+    "global_queue_limit": 24,
+    "max_in_flight_per_job": 2
+  },
+  "scheduling": {
+    "aging_per_sec": 0.15,
+    "final_base_bonus": 20,
+    "final_age_boost_after_s": 6.0,
+    "final_age_boost": 1000.0,
+    "reviewer_busy_penalty": 0.5,
+    "urgent_preview_priority": 8
+  },
+  "chunking": {
+    "tile": 32,
+    "preview_chunk_spp": 1,
+    "final_chunk_spp": 4,
+    "preemption": "cooperative",
+    "scheduling_preemption_unit": "tile",
+    "cancellation_check_unit": "row",
+    "non_preemptible_phase": "an in-flight tile completes; superseded/cancelled work stops at its next row boundary"
+  },
+  "failure": {
+    "fail_after_failed_chunks": 2,
+    "slot_released_on_failure": true
+  },
+  "quality": {
+    "preview_spp": 4,
+    "final_spp": 48,
+    "preview_width": 160,
+    "preview_height": 120,
+    "final_width": 200,
+    "final_height": 150
+  },
+  "resources": {
+    "slot_w": 224,
+    "slot_h": 168,
+    "num_slots": 20
+  },
+  "sla": {
+    "preview_first_frame_ms": 3000,
+    "min_workers_for_sla": 4
+  }
+}

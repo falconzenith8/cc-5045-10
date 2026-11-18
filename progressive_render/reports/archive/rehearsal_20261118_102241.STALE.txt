@@ -1,0 +1,78 @@
+
+========================================================================
+ DESIGN REVIEW PROGRESSIVE RENDER — REHEARSAL REPORT
+========================================================================
+policy: preview-contention-default channel=default status=active
+
+## rapid_camera_drag  (4.67s)
+   8 camera versions in <1s; only the newest survives
+   versions submitted : 8
+   distinct hashes    : 8
+   superseded previews: 7
+   surviving jobs     : 1
+
+## preview_flood_vs_final  (9.25s)
+   final job must finish despite continuous previews
+   final state        : done
+   final latency ms   : 9030.7
+   final effective spp: 32 / 32
+   previews meanwhile : 1 completed, 75 superseded
+
+## reviewer_quota_enforced  (0.1s)
+   4th+ queued preview gets a bounded 429-style rejection
+   accepted : 3
+   rejected : 5
+   reason   : {'status': 'rejected', 'reason': 'reviewer_quota', 'limit': 3, 'retry_after': 'cancel or wait for an older preview'}
+
+## failure_feeds_back_to_preview  (0.11s)
+   worker exception becomes job FAILED with reason
+   state    : failed
+   error    : RuntimeError('injected render failure (failure-path rehearsal)')
+
+## long_final_with_interactive_previews  (28.68s)
+   previews stay responsive while a 48spp final renders
+   SLA (3000ms) held: True (needs >= 4 workers)
+   preview 0: done      first-frame=567.1ms spp=2/2
+   preview 1: done      first-frame=97.2ms spp=2/2
+   preview 2: done      first-frame=90.5ms spp=2/2
+   preview 3: done      first-frame=39.9ms spp=2/2
+   final   : done spp=48/48 latency=28647.4ms
+
+## priority_toggle_reorders_queue  (16.87s)
+   with the pool saturated, urgent p8 starts before p2 even though it was submitted later
+   urgent(p8) start ms : 50.7 state=done
+   low (p2) start ms : 10761.7 state=done
+   high scheduled first: True
+
+## preview_contention_sample  (27.38s)
+   long final + urgent previews, run to completion; queue time and recovery proven from the timeline
+   previews submitted : 6
+   preview 0: done      queue=8.0ms (timeline 8.0ms) first-frame=23.6ms resumes=4
+   preview 1: done      queue=60.4ms (timeline 60.4ms) first-frame=116.5ms resumes=4
+   preview 2: done      queue=82.6ms (timeline 82.6ms) first-frame=92.9ms resumes=0
+   preview 3: done      queue=25.1ms (timeline 25.1ms) first-frame=35.7ms resumes=0
+   preview 4: done      queue=2.6ms (timeline 2.6ms) first-frame=38.8ms resumes=0
+   preview 5: done      queue=36.0ms (timeline 36.0ms) first-frame=46.2ms resumes=0
+   final   : done spp=48/48 queue=357.3ms
+   queue evidence ok : True (6/6)
+   preempted jobs    : 15 all resumed=True all terminal=True
+   completed clean   : True
+
+------------------------------------------------------------------------
+ KERNEL METRICS
+------------------------------------------------------------------------
+   submitted         : 103
+   completed         : 27
+   superseded        : 75
+   cancelled         : 0
+   rejected_quota    : 5
+   rejected_full     : 0
+   failed            : 1
+   chunks_run        : 2442
+   chunks_failed     : 2
+   preview           : n=18 min=1005 avg=2397 max=15860
+   final             : n=9 min=9031 avg=17695 max=28647
+   preview queue     : n=18 min=3 avg=668 max=10762
+   final queue       : n=9 min=12 avg=78 max=357
+   recovered         : 142
+========================================================================

@@ -77,13 +77,17 @@
   .pill { font-size:10.5px; padding:1px 6px; border-radius:5px;
           background:var(--panel2); border:1px solid var(--line); color:var(--muted); }
   .reject { color:var(--bad); font-weight:700; }
+  .err { margin-top:8px; padding:7px 9px; border-radius:6px;
+         background:rgba(239,111,111,.12); border:1px solid var(--bad);
+         color:#ffb3b3; font-size:11.5px; word-break:break-word; }
 </style>
 </head>
 <body>
 <header>
   <h1>设计评审渐进渲染服务</h1>
   <span class="sub">预览争用内核 · 有界进程池
-    <span id="poolInfo" class="pill"></span></span>
+    <span id="poolInfo" class="pill"></span>
+    <span id="policyPill" class="pill"></span></span>
   <span class="sub" style="margin-left:auto">
     队列 <b id="queueDepth">0</b>/<span id="queueLimit"></span> ·
     在途 <b id="inFlight">0</b></span>
@@ -129,12 +133,16 @@
       <h2>材质调整</h2>
       <label>主球体反照率 R,G,B（0–1）</label>
       <input id="albedo" value="0.8,0.25,0.2">
-      <label>预览优先级（可切换预览争用强度）</label>
+      <label>预览优先级（切换预览争用强度）</label>
       <select id="priority">
+        <option value="8">8 · 紧急（保留交互通道，抢占长任务）</option>
         <option value="9">9 · 高（交互优先）</option>
         <option value="5" selected>5 · 普通</option>
         <option value="2">2 · 低（让位于最终图）</option>
       </select>
+      <div class="hint">p8 及以上为「紧急预览」：只要存在紧急预览，内核为它保留 1 个
+        worker，长最终任务最多占用 workers-1 个，保证首帧在
+        <b id="slaHint">3000</b> ms 内返回。</div>
       <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
         <input type="checkbox" id="coalesce" checked style="width:auto">
         拖动时自动取代旧版本（取消勾选可演练评审者限额排队）
@@ -163,12 +171,14 @@
           <div class="meta">
             <span>配置版本</span><b id="pvHash">-</b>
             <span>任务状态</span><b id="pvState">-</b>
+            <span>排队时间</span><b id="pvQueue">-</b>
             <span>首帧延迟</span><b id="pvFirst">-</b>
             <span>当前视图版本</span><b id="viewHash">-</b>
           </div>
           <div class="prog" style="margin-top:8px"><i id="pvProg" style="width:0%"></i></div>
           <div class="hint" id="pvStale" style="display:none;color:var(--warn)">
             该帧属于旧配置版本，不会覆盖当前视图；已停止继续消耗预算。</div>
+          <div class="err" id="pvErr" style="display:none"></div>
         </div>
         <div class="frame-box" id="finalBox">
           <h3><span class="badge b-final">FINAL</span>
@@ -177,10 +187,13 @@
           <div class="meta">
             <span>配置版本</span><b id="fnHash">-</b>
             <span>任务状态</span><b id="fnState">-</b>
+            <span>排队时间</span><b id="fnQueue">-</b>
             <span>完成延迟</span><b id="fnLatency">-</b>
             <span>有效采样</span><b id="fnEff">-</b>
+            <span>恢复次数</span><b id="fnResume">-</b>
           </div>
           <div class="prog" style="margin-top:8px"><i id="fnProg" style="width:0%"></i></div>
+          <div class="err" id="fnErr" style="display:none"></div>
         </div>
       </div>
       <div class="hint" style="margin-top:10px">
@@ -219,11 +232,35 @@
       <div class="jobs-wrap">
         <table>
           <thead><tr><th>任务</th><th>评审者</th><th>类型</th><th>状态</th>
-            <th>spp</th><th>分片</th><th>年龄</th><th></th></tr></thead>
+            <th>spp</th><th>分片</th><th>排队</th><th>恢复</th><th></th></tr></thead>
           <tbody id="jobsBody"></tbody>
         </table>
       </div>
-      <div class="hint">等待超过 6 秒的最终图获得老化跃升，连续预览无法将其永久饿死。</div>
+      <div class="hint">调度 = 优先级 + 等待时间；紧急预览 p8+ 保留 1 个 worker。
+        等待超过 <b id="ageHint">6</b> 秒的最终图获得老化跃升，连续预览无法将其永久饿死。</div>
+    </div>
+
+    <div class="card">
+      <h2>调度策略（来自 config/scheduling_policy.json）</h2>
+      <div class="meta" id="policyView">
+        <span>策略</span><b id="polName">-</b>
+        <span>发布通道</span><b id="polChannel">-</b>
+        <span>状态</span><b id="polStatus">-</b>
+        <span>worker 上限</span><b id="polWorkers">-</b>
+        <span>保留交互通道</span><b id="polLane">-</b>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>执行时间线（排队时间与恢复证据）</h2>
+      <div class="jobs-wrap" style="max-height:220px">
+        <table>
+          <thead><tr><th>+ms</th><th>事件</th><th>任务</th><th>详情</th></tr></thead>
+          <tbody id="timelineBody"></tbody>
+        </table>
+      </div>
+      <div class="hint">时间线来自内核事件日志；排队时间由 submitted→dispatch 重算，
+        抢占（preempt）必须有后续 resume，验证器不接受仅凭计数器。</div>
     </div>
 
     <div class="card" id="simCard" style="display:none">

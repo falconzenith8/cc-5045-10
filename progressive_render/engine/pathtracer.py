@@ -205,16 +205,21 @@ def render_chunk(scene, cam, width, height, tile, spp, accum, counts,
     counts: cint array of width*height, samples accumulated.
     Tiles cover disjoint pixels, so no lock is needed for the accumulator;
     `lock` is accepted for API symmetry but unused.
-    Returns number of samples rendered per pixel, or 0 if cancelled.
+
+    Returns the number of full rows finished. Cancellation is only observed
+    between rows, so the return value is exactly resumable: the caller may
+    re-dispatch the tile with its top edge moved down by this many rows and no
+    pixel is sampled twice or skipped. That row boundary is the bounded
+    non-preemptible phase of a chunk.
     """
     cam = dict(cam)
     cam["_aspect"] = width / height
     camera = make_camera(cam) + (width, height)
     x0, y0, x1, y1 = tile
-    done = 0
+    rows = 0
     for y in range(y0, y1):
         if cancel_event is not None and cancel_event.is_set():
-            return done
+            return rows
         for x in range(x0, x1):
             seed_src = f"{x},{y},{counts[y * width + x]},{x0},{y0}".encode()
             rng = random.Random(int.from_bytes(
@@ -232,10 +237,10 @@ def render_chunk(scene, cam, width, height, tile, spp, accum, counts,
             accum[base + 1] += col[1]
             accum[base + 2] += col[2]
             counts[idx] += spp
-            done += 1
+        rows += 1
         if progress_cb:
-            progress_cb(done)
-    return spp
+            progress_cb(rows)
+    return rows
 
 
 # ---------------------------------------------------------------- tonemap / png

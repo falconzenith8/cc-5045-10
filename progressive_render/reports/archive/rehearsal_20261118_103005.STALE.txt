@@ -1,0 +1,38 @@
+
+========================================================================
+ DESIGN REVIEW PROGRESSIVE RENDER — REHEARSAL REPORT
+========================================================================
+policy: preview-contention-default channel=default status=active
+
+## preview_contention_sample  (28.68s)
+   long final + urgent previews, run to completion; queue time and recovery proven from the timeline
+   previews submitted : 6
+   preview 0: done      queue=40.6ms (timeline 40.6ms) first-frame=55.3ms resumes=0
+   preview 1: done      queue=41.1ms (timeline 41.1ms) first-frame=69.4ms resumes=0
+   preview 2: done      queue=4.8ms (timeline 4.8ms) first-frame=14.7ms resumes=0
+   preview 3: done      queue=53.7ms (timeline 53.7ms) first-frame=64.3ms resumes=0
+   preview 4: done      queue=89.1ms (timeline 89.1ms) first-frame=104.3ms resumes=0
+   preview 5: done      queue=10.5ms (timeline 10.5ms) first-frame=29.2ms resumes=0
+   final   : done spp=48/48 queue=42.8ms
+   queue evidence ok : True (6/6)
+   preempted jobs    : 0 all resumed=True all terminal=True
+   completed clean   : True
+
+------------------------------------------------------------------------
+ KERNEL METRICS
+------------------------------------------------------------------------
+   submitted         : 7
+   completed         : 7
+   superseded        : 0
+   cancelled         : 0
+   rejected_quota    : 0
+   rejected_full     : 0
+   failed            : 0
+   chunks_run        : 528
+   chunks_failed     : 0
+   preview           : n=6 min=965 avg=1448 max=3196
+   final             : n=1 min=28637 avg=28637 max=28637
+   preview queue     : n=6 min=5 avg=40 max=89
+   final queue       : n=1 min=43 avg=43 max=43
+   recovered         : 0
+========================================================================

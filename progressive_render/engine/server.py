@@ -5,6 +5,8 @@ Endpoints:
   POST /api/preview            submit low-budget preview for current config
   POST /api/final              enqueue stable config into the final queue
   GET  /api/kernel             full scheduler snapshot (drives the panel)
+  GET  /api/timeline           bounded execution timeline (evidence)
+  GET  /api/policy             release scheduling policy
   GET  /api/job/<id>           one job + its bound config version
   GET  /api/frame/<id>?seq=N   progressive PNG (304 while unchanged)
   POST /api/cancel/<id>        stop a stale preview, release its budget
@@ -18,7 +20,11 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .kernel import Kernel, PREVIEW, FINAL, DEFAULT_WORKERS
+from .kernel import (
+    Kernel, PREVIEW, FINAL, DEFAULT_WORKERS,
+    PREVIEW_DEFAULT_SPP, FINAL_DEFAULT_SPP,
+    PREVIEW_DEFAULT_W, PREVIEW_DEFAULT_H,
+    FINAL_DEFAULT_W, FINAL_DEFAULT_H, POLICY)
 from .scenes import build_config, SCENES, DEFAULT_CAMERA
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
@@ -40,10 +46,13 @@ def _parse_material_overrides(form):
 
 def _config_from_form(form):
     scene_name = form.get("scene", "simple_sphere")
-    width = int(form.get("width", 160))
-    height = int(form.get("height", 120))
     kind = form.get("kind", PREVIEW)
-    target_spp = int(form.get("target_spp", 4 if kind == PREVIEW else 48))
+    width = int(form.get("width", PREVIEW_DEFAULT_W if kind == PREVIEW
+                         else FINAL_DEFAULT_W))
+    height = int(form.get("height", PREVIEW_DEFAULT_H if kind == PREVIEW
+                          else FINAL_DEFAULT_H))
+    target_spp = int(form.get("target_spp", PREVIEW_DEFAULT_SPP if kind == PREVIEW
+                              else FINAL_DEFAULT_SPP))
     camera = {
         "pos": [float(x) for x in form["cam_pos"].split(",")],
         "target": [float(x) for x in form.get(
@@ -91,6 +100,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_file("app.js", "application/javascript; charset=utf-8")
         if path == "/api/kernel":
             return self._json(self._kernel().snapshot())
+        if path == "/api/timeline":
+            since = int(self.headers.get("X-Since-Seq", 0) or 0)
+            return self._json({"events": self._kernel().timeline(
+                since_seq=since)})
+        if path == "/api/policy":
+            return self._json(POLICY)
         if path.startswith("/api/job/"):
             job = self._kernel().get_job(path.rsplit("/", 1)[-1])
             if not job:
@@ -147,9 +162,9 @@ class Handler(BaseHTTPRequestHandler):
             kind = FINAL if path.endswith("final") else PREVIEW
             form.setdefault("kind", kind)
             if kind == FINAL:
-                form.setdefault("target_spp", 48)
-                form.setdefault("width", 200)
-                form.setdefault("height", 150)
+                form.setdefault("target_spp", FINAL_DEFAULT_SPP)
+                form.setdefault("width", FINAL_DEFAULT_W)
+                form.setdefault("height", FINAL_DEFAULT_H)
             config = _config_from_form(form)
             jid, info = self._kernel().submit(
                 config,
